@@ -1,6 +1,6 @@
 FROM ghcr.io/wheetazlab/ubi-devcontainer-arm:latest
 
-USER 10001
+USER root
 
 # Set default shell to zsh
 ENV SHELL=/bin/zsh
