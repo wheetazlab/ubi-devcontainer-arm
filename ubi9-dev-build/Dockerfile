@@ -2,15 +2,15 @@
 # I use Podman desktop to push the image to ghcr.io.  You can push to ghcr.io the Podman desktop.
 # you can use the podman extension in VS Code to build and push the image to quay.io or ghcr.io or run the following command in the terminal.
 # change directory into ubi9-dev-build
-# "podman build -t ghcr.io/wheetazlab/ubi-devcontainer:latest ."  (but this will need to be your registry)
+# "podman build -t ghcr.io/wheetazlab/ubi-devcontainer-arm:latest ."  (but this will need to be your registry)
 
 # syntax=docker/dockerfile:1.3-labs
 
 # updateBaseImages.sh can't operate on SHA-based tags as they're not date-based or semver-sequential, and therefore cannot be ordered
 FROM quay.io/devfile/base-developer-image:ubi9-latest
 
-LABEL org.opencontainers.image.source=https://github.com/wheetazlab/ubi-devcontainer
-LABEL name="wheetazlab/ubi-devcontainer"
+LABEL org.opencontainers.image.source=https://github.com/wheetazlab/ubi-devcontainer-arm:latest
+LABEL name="wheetazlab/ubi-devcontainer-arm:latest"
 LABEL version="latest"
 
 
@@ -22,6 +22,9 @@ USER 0
 # $PROFILE_EXT contains all additions made to the bash environment
 ENV PROFILE_EXT=/etc/profile.d/udi_environment.sh
 RUN touch ${PROFILE_EXT} & chown 10001 ${PROFILE_EXT}
+
+# Disable subscription-manager plugin
+RUN dnf remove subscription-manager -y
 
 USER 10001
 
@@ -241,165 +244,64 @@ RUN echo 'alias docker=podman' >> ${PROFILE_EXT}
 COPY --chown=0:0 containers.conf /etc/containers/containers.conf
 
 ENV K8S_VERSION=1.28
-## kubectl
-RUN <<EOF
-set -euf -o pipefail
-
-cat <<EOF2 > /etc/yum.repos.d/kubernetes.repo
-[kubernetes]
-name=Kubernetes
-baseurl=https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/rpm/
-enabled=1
-gpgcheck=1
-gpgkey=https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION}/rpm/repodata/repomd.xml.key
-EOF2
-
-dnf install -y kubectl
-curl -sSL -o ~/.kubectl_aliases https://raw.githubusercontent.com/ahmetb/kubectl-alias/master/.kubectl_aliases
-echo '[ -f ~/.kubectl_aliases ] && source ~/.kubectl_aliases' >> ${PROFILE_EXT}
-EOF
+RUN curl -LO "https://dl.k8s.io/release/v${K8S_VERSION}.0/bin/linux/arm64/kubectl" && \
+    chmod +x kubectl && \
+    mv kubectl /usr/local/bin/kubectl && \
+    curl -sSL -o ~/.kubectl_aliases https://raw.githubusercontent.com/ahmetb/kubectl-alias/master/.kubectl_aliases && \
+    echo '[ -f ~/.kubectl_aliases ] && source ~/.kubectl_aliases' >> ${PROFILE_EXT}
 
 ## shellcheck
-RUN <<EOF
-dnf install -y xz
-set -euf -o pipefail
-TEMP_DIR="$(mktemp -d)"
-cd "${TEMP_DIR}"
-SHELL_CHECK_VERSION="0.8.0"
-SHELL_CHECK_ARCH="arm64"
-SHELL_CHECK_TGZ="shellcheck-v${SHELL_CHECK_VERSION}.linux.${SHELL_CHECK_ARCH}.tar.xz"
-SHELL_CHECK_TGZ_URL="https://github.com/koalaman/shellcheck/releases/download/v${SHELL_CHECK_VERSION}/${SHELL_CHECK_TGZ}"
-curl -sSLO "${SHELL_CHECK_TGZ_URL}"
-tar -xv --no-same-owner -f "${SHELL_CHECK_TGZ}"
-mv "${TEMP_DIR}"/shellcheck-v${SHELL_CHECK_VERSION}/shellcheck /bin/shellcheck
-cd -
-rm -rf "${TEMP_DIR}"
-EOF
+RUN dnf install -y xz && \
+    curl -sSL "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.armv6hf.tar.xz" | tar -xJv && \
+    mv shellcheck-v0.10.0/shellcheck /usr/local/bin/ && \
+    chmod +x /usr/local/bin/shellcheck && \
+    rm -rf shellcheck-v0.10.0
 
 ## krew
-RUN <<EOF
-set -euf -o pipefail
-TEMP_DIR="$(mktemp -d)"
-cd "${TEMP_DIR}"
-KREW_VERSION="0.4.2"
-KREW_ARCH="linux_amd64"
-KREW_TGZ="krew-${KREW_ARCH}.tar.gz"
-KREW_TGZ_URL="https://github.com/kubernetes-sigs/krew/releases/download/v${KREW_VERSION}/${KREW_TGZ}"
-curl -sSLO "${KREW_TGZ_URL}"
-curl -sSLO "${KREW_TGZ_URL}.sha256"
-
-# File ${KREW_TGZ_URL}.sha256 has invalid format to be checked with sha256sum.
-# It needs to create a valid one.
-echo "$(cat ${KREW_TGZ}.sha256)  ${KREW_TGZ}" > "${KREW_TGZ}.sha256"
-
-sha256sum -c "${KREW_TGZ}.sha256" 2>&1 | grep OK
-
-tar -zxv --no-same-owner -f "${KREW_TGZ}"
-./"krew-${KREW_ARCH}" install krew
-echo 'export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"' >> ${PROFILE_EXT}
-export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"
-# kubens and kubectx
-kubectl krew install ns
-kubectl krew install ctx
-cd -
-rm -rf "${TEMP_DIR}"
-EOF
+RUN set -euf -o pipefail && \
+    TEMP_DIR="$(mktemp -d)" && \
+    cd "${TEMP_DIR}" && \
+    KREW_VERSION="0.4.4" && \
+    KREW_ARCH="linux_arm64" && \
+    KREW_TGZ="krew-${KREW_ARCH}.tar.gz" && \
+    KREW_TGZ_URL="https://github.com/kubernetes-sigs/krew/releases/download/v${KREW_VERSION}/${KREW_TGZ}" && \
+    curl -sSLO "${KREW_TGZ_URL}" && \
+    tar -zxv --no-same-owner -f "${KREW_TGZ}" && \
+    ./"krew-${KREW_ARCH}" install krew && \
+    echo 'export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH"' >> ${PROFILE_EXT} && \
+    export PATH="${KREW_ROOT:-$HOME/.krew}/bin:$PATH" && \
+    kubectl krew install ns && \
+    kubectl krew install ctx && \
+    cd - && \
+    rm -rf "${TEMP_DIR}"
 
 ## helm
-RUN <<EOF
-set -euf -o pipefail
-TEMP_DIR="$(mktemp -d)"
-cd "${TEMP_DIR}"
-HELM_VERSION="3.14.3"
-HELM_ARCH="linux-arm64"
-HELM_TGZ="helm-v${HELM_VERSION}-${HELM_ARCH}.tar.gz"
-HELM_TGZ_URL="https://get.helm.sh/${HELM_TGZ}"
-curl -sSLO "${HELM_TGZ_URL}"
-curl -sSLO "${HELM_TGZ_URL}.sha256sum"
-sha256sum -c "${HELM_TGZ}.sha256sum" 2>&1 | grep OK
-tar -zxv --no-same-owner -f "${HELM_TGZ}"
-mv "${HELM_ARCH}"/helm /usr/local/bin/helm
-cd -
-rm -rf "${TEMP_DIR}"
-EOF
+RUN curl -sSL "https://get.helm.sh/helm-v3.14.3-linux-arm64.tar.gz" | tar -xz && \
+    mv linux-arm64/helm /usr/local/bin/helm && \
+    chmod +x /usr/local/bin/helm && \
+    rm -rf linux-arm64
 
 ## kustomize
-RUN <<EOF
-set -euf -o pipefail
-TEMP_DIR="$(mktemp -d)"
-cd "${TEMP_DIR}"
-KUSTOMIZE_VERSION="5.3.0"
-KUSTOMIZE_ARCH="linux_arm64"
-KUSTOMIZE_TGZ="kustomize_v${KUSTOMIZE_VERSION}_${KUSTOMIZE_ARCH}.tar.gz"
-KUSTOMIZE_TGZ_URL="https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/${KUSTOMIZE_TGZ}"
-KUSTOMIZE_CHEKSUMS_URL="https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/checksums.txt"
-curl -sSLO "${KUSTOMIZE_TGZ_URL}"
-curl -sSLO "${KUSTOMIZE_CHEKSUMS_URL}"
-sha256sum --ignore-missing -c "checksums.txt" 2>&1 | grep OK
-tar -zxv --no-same-owner -f "${KUSTOMIZE_TGZ}"
-mv kustomize /usr/local/bin/
-cd -
-rm -rf "${TEMP_DIR}"
-EOF
+RUN curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v5.3.0/kustomize_v5.3.0_linux_arm64.tar.gz" | tar -xz && \
+    mv kustomize /usr/local/bin/kustomize && \
+    chmod +x /usr/local/bin/kustomize
 
 ## tektoncd-cli
-RUN <<EOF
-set -euf -o pipefail
-TEMP_DIR="$(mktemp -d)"
-cd "${TEMP_DIR}"
-TKN_VERSION="0.20.0"
-TKN_ARCH="Linux_arm64"
-TKN_TGZ="tkn_${TKN_VERSION}_${TKN_ARCH}.tar.gz"
-TKN_TGZ_URL="https://github.com/tektoncd/cli/releases/download/v${TKN_VERSION}/${TKN_TGZ}"
-TKN_CHEKSUMS_URL="https://github.com/tektoncd/cli/releases/download/v${TKN_VERSION}/checksums.txt"
-curl -sSLO "${TKN_TGZ_URL}"
-curl -sSLO "${TKN_CHEKSUMS_URL}"
-sha256sum --ignore-missing -c "checksums.txt" 2>&1 | grep OK
-tar -zxv --no-same-owner -f "${TKN_TGZ}"
-mv tkn /usr/local/bin/
-cd -
-rm -rf "${TEMP_DIR}"
-EOF
+RUN curl -sSL -o tektoncd-cli.rpm "https://github.com/tektoncd/cli/releases/download/v0.39.0/tektoncd-cli-0.39.0_Linux-ARM64.rpm" && \
+    dnf install -y tektoncd-cli.rpm && \
+    rm tektoncd-cli.rpm
 
 ## knative-cli
-RUN <<EOF
-set -euf -o pipefail
-TEMP_DIR="$(mktemp -d)"
-cd "${TEMP_DIR}"
-KN_VERSION="1.13.0"
-KN_ARCH="linux-arm64"
-KN_BIN="kn-${KN_ARCH}"
-KN_BIN_URL="https://github.com/knative/client/releases/download/knative-v${KN_VERSION}/${KN_BIN}"
-KN_CHEKSUMS_URL="https://github.com/knative/client/releases/download/knative-v${KN_VERSION}/checksums.txt"
-curl -sSLO "${KN_BIN_URL}"
-curl -sSLO "${KN_CHEKSUMS_URL}"
-sha256sum --ignore-missing -c "checksums.txt" 2>&1 | grep OK
-mv "${KN_BIN}" kn
-chmod +x kn
-mv kn /usr/local/bin
-cd -
-rm -rf "${TEMP_DIR}"
-EOF
+RUN curl -sSL "https://github.com/knative/client/releases/download/knative-v1.13.0/kn-linux-arm64" -o kn && \
+    chmod +x kn && \
+    mv kn /usr/local/bin/kn
 
 ## terraform-cli
-RUN <<EOF
-set -euf -o pipefail
-TEMP_DIR="$(mktemp -d)"
-cd "${TEMP_DIR}"
-TF_VERSION="1.7.5"
-TF_ARCH="linux_arm64"
-TF_ZIP="terraform_${TF_VERSION}_${TF_ARCH}.zip"
-TF_ZIP_URL="https://releases.hashicorp.com/terraform/${TF_VERSION}/${TF_ZIP}"
-TF_CHEKSUMS_URL="https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_SHA256SUMS"
-curl -sSLO "${TF_ZIP_URL}"
-curl -sSLO "${TF_CHEKSUMS_URL}"
-sha256sum --ignore-missing -c "terraform_${TF_VERSION}_SHA256SUMS" 2>&1 | grep OK
-unzip ${TF_ZIP}
-chmod +x terraform
-mv terraform /usr/local/bin
-cd -
-rm -rf "${TEMP_DIR}"
-EOF
+RUN curl -sSL "https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_arm64.zip" -o terraform.zip && \
+    unzip terraform.zip && \
+    chmod +x terraform && \
+    mv terraform /usr/local/bin/terraform && \
+    rm terraform.zip
 
 # Install Terraform-docs
 RUN curl -sSLo ./terraform-docs.tar.gz https://terraform-docs.io/dl/v0.19.0/terraform-docs-v0.19.0-linux-arm64.tar.gz; \
@@ -438,17 +340,14 @@ RUN curl -sSLo ./terraform-docs.tar.gz https://terraform-docs.io/dl/v0.19.0/terr
 # EOF
 
 # Bash completions
-# RUN dnf -y install bash-completion \
-#     && dnf clean all \
-#     && rm -rf /var/cache/yum
-
-
-# RUN <<EOF
-# oc completion bash > /usr/share/bash-completion/completions/oc
-# tkn completion bash > /usr/share/bash-completion/completions/tkn 
-# kubectl completion bash > /usr/share/bash-completion/completions/kubectl
-# cat ${NVM_DIR}/bash_completion > /usr/share/bash-completion/completions/nvm
-# EOF
+# RUN dnf -y install bash-completion && \
+#     oc completion bash > /usr/share/bash-completion/completions/oc && \
+#     chmod +x /usr/local/bin/tkn && \
+#     tkn completion bash > /usr/share/bash-completion/completions/tkn && \
+#     kubectl completion bash > /usr/share/bash-completion/completions/kubectl && \
+#     cat ${NVM_DIR}/bash_completion > /usr/share/bash-completion/completions/nvm && \
+#     dnf clean all && \
+#     rm -rf /var/cache/yum
 
 ## Add sdkman's init script launcher to the end of ${PROFILE_EXT} since we are not adding it on sdkman install
 ## NOTE: all modifications to ${PROFILE_EXT} must happen BEFORE this step in order for sdkman to function correctly
@@ -456,6 +355,28 @@ RUN curl -sSLo ./terraform-docs.tar.gz https://terraform-docs.io/dl/v0.19.0/terr
 # RUN echo '[[ -s "$SDKMAN_DIR/bin/sdkman-init.sh" ]] && source "$SDKMAN_DIR/bin/sdkman-init.sh"' >> ${PROFILE_EXT}
 
 USER 0
+
+# Ensure EPEL repository is properly configured
+RUN dnf install -y epel-release && \
+    dnf update -y && \
+    dnf install -y yum-utils zsh iputils && \
+    dnf install bind-utils -y && \
+    dnf -y install bash-completion && \
+    pip install ansible && \
+    rm -rf /var/cache/yum
+
+# Install Oh-My-Zsh
+RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/v1.2.1/zsh-in-docker.sh)" -- \
+    -t jonathan \
+    -p ansible \
+    -p terraform \
+    -p kubectl \
+    -p helm \
+    -p oc \
+    -p podman \
+    -p https://github.com/zsh-users/zsh-autosuggestions \
+    -p https://github.com/zsh-users/zsh-completions
+
 # Install Ansible, Zsh and iputils
 RUN yum install -y yum-utils zsh iputils && \
     dnf install bind-utils -y && \
@@ -473,10 +394,12 @@ RUN yum install -y yum-utils zsh && \
     pip install ansible
 
 # Add Microsoft repository for PowerShell
-RUN rpm --import https://packages.microsoft.com/keys/microsoft.asc && \
-    dnf config-manager --add-repo https://packages.microsoft.com/yumrepos/microsoft-rhel9.0-prod && \
-    dnf install -y powershell && \
-    dnf clean all
+RUN dnf install -y openssl libunwind && \
+    mkdir -p /opt/microsoft/powershell/7 && \
+    wget -O -q /tmp/powershell.tar.gz https://github.com/PowerShell/PowerShell/releases/download/v7.5.0-rc.1/powershell-7.5.0-rc.1-linux-arm64.tar.gz && \
+    tar zxf /tmp/powershell.tar.gz -C /opt/microsoft/powershell/7 && \
+    chmod +x /opt/microsoft/powershell/7/pwsh && \
+    ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh
 
 # Install locales package and generate the locale
 RUN dnf install -y glibc-langpack-en glibc-all-langpacks && \
@@ -492,22 +415,10 @@ ENV LC_ALL=en_US.UTF-8
 # Disable oh-my-zsh compfix verification
 ENV ZSH_DISABLE_COMPFIX=true
 
-# Uses "jonathan. Uses some bundled plugins and installs some more from github
-RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/v1.2.1/zsh-in-docker.sh)" -- \
-    -t jonathan \
-    -p ansible \
-    -p terraform \
-    -p kubectl \
-    -p helm \
-    -p oc \
-    -p podman \
-    -p https://github.com/zsh-users/zsh-autosuggestions \
-    -p https://github.com/zsh-users/zsh-completions
-
 # Install lastest AWS CLI
 RUN yum remove awscli -y; \
     curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"; \
-    unzip awscliv2.zip; \
+    unzip -q awscliv2.zip; \
     sudo ./aws/install; \
     rm -rf awscliv2.zip aws
 

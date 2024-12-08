@@ -1,4 +1,4 @@
-FROM ghcr.io/wheetazlab/ubi-devcontainer:latest
+FROM ghcr.io/wheetazlab/ubi-devcontainer-arm:latest
 
 USER 10001
 
